@@ -3,6 +3,16 @@ package Murakumo::Storage_Agent;
 use 5.014;
 use strict;
 use warnings FATAL => 'all';
+use Class::Accessor::Lite ( rw => [qw( ua uuid admin_key api_uri db_path mount_path )] );
+use URI;
+use Data::Dumper;
+use JSON;
+use DBI;
+use LWP::UserAgent;
+use Sys::Syslog qw(:DEFAULT);
+use IPC::Cmd;
+
+local $SIG{INT}  = local $SIG{TERM} = sub { warn "stopped..." };
 
 =head1 NAME
 
@@ -15,6 +25,12 @@ Version 0.01
 =cut
 
 our $VERSION = '0.01';
+
+our $SYSLOG_FACILITY = q{local0};
+our @UA_SSL_OPTS     = ( verify_hostname => 0, SSL_verify_mode => q{SSL_VERIFY_NONE} );
+our $UA_TIMEOUT      = 30;
+
+our $storage_regist_path = q{/admin/storage_register_status};
 
 
 =head1 SYNOPSIS
@@ -39,14 +55,110 @@ if you don't export anything, such as for a purely object-oriented module.
 
 =cut
 
-sub function1 {
+sub new {
+  my ($class, $params) = @_;
+  my $obj = bless $params, $class;
+
+  my $ua = LWP::UserAgent->new;
+  $ua->timeout ( $UA_TIMEOUT  );
+  $ua->ssl_opts( @UA_SSL_OPTS );
+
+  $obj->ua( $ua );
+
+  return $obj;
+}
+
+sub json_post {
+   my $self = shift;
+   my ($uri, $params) = @_;
+
+   my $request = HTTP::Request->new( 'POST', $uri );
+   $request->header('Content-Type' => 'application/json');
+   $request->content( encode_json $params );
+
+   my $response = $self->ua->request( $request );
+
+   return $response;
+
 }
 
 =head2 function2
 
 =cut
 
-sub function2 {
+sub run {
+  my ($self) = @_;
+
+  my $uri = URI->new( $self->api_uri . $storage_regist_path . "/" . $self->uuid );
+  $uri->query_form( admin_key => $self->admin_key );
+
+  local $@;
+  eval {
+    my $params = $self->gathering_params;
+
+    my $r = $self->json_post( $uri, $params );
+
+    if (! $r->is_success) {
+      logging ( "*** json post http error" );
+    }
+    my $content = $r->content;
+    if (my $v = decode_json $content) {
+      if (! $v->{result}) {
+        logging ( "*** api result failure" );
+      }
+    }
+  };
+
+  logging ( $@ ) if $@;
+
+}
+
+sub logging {
+  my $string = shift;
+
+  {
+    no strict 'refs';
+    warn $string if $ENV{DEBUG};
+  }
+
+  openlog __PACKAGE__, "ndelay", $SYSLOG_FACILITY;
+  syslog ( "info",  $string );
+  closelog;
+
+}
+
+sub gathering_params {
+  my $self = shift;
+  my ($iowait, $avail_size);
+
+  my $result = {};
+
+  {
+    # cpu  1139530 3529613 1820519 6796945469 12447146 62005 187934 0 0
+    my $cpu;
+    open my $fh, "<", "/proc/stat";
+    ($cpu) = grep { /^cpu\s/ } <$fh>;
+    close $fh;
+    my @cpu_stats = $cpu =~ /(\d+)/g;
+    $result->{iowait} = $cpu_stats[4];
+  }
+
+  {
+    my @results = IPC::Cmd::run( command => "/bin/df", timeout => 10 );
+    # /dev/sdb1            960809912 123678940 788324596  14% /export/vps
+    for my $line ( split /\n/, $results[3]->[0] ) {
+      if ($line =~ /(\d+) \s+ \S+ \s+ (\S+) \s* $/x) {
+        if ($2 eq $self->mount_path) {
+          $result->{avail_size} = $1;
+        }
+      }
+    }
+  }
+
+  warn Dumper $result;
+
+  return $result;
+
 }
 
 =head1 AUTHOR

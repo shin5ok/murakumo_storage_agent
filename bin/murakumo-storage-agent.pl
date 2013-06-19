@@ -7,10 +7,23 @@ use strict;
 use App::Daemon qw( daemonize );
 use JSON;
 use FindBin;
+use Path::Class;
 use File::Basename;
-use opts;
 
-use lib qq{$FindBin::Bin/../lib};
+BEGIN {
+
+  unshift @INC, qq{$FindBin::Bin/../lib};
+  if (-l $0) {
+    my $org = readlink $0;
+    my $f   = file ($org);
+
+    my $dir = dirname $f->absolute;
+    my $lib_path = qq{$dir/../lib};
+    unshift @INC, $lib_path;
+  }
+
+};
+
 use Murakumo::Storage_Agent;
 
 our $name        = basename $0;
@@ -29,7 +42,6 @@ if ( -f $config_path ) {
 my $params = {
   admin_key  => $ENV{MURAKUMO_ADMIN_KEY},
   api_uri    => $ENV{MURAKUMO_API_URI},
-  db_path    => $ENV{STORAGE_STATUS_DB_PATH},
   mount_path => $ENV{STORAGE_MOUNT_PATH},
   uuid       => $ENV{STORAGE_UUID},
 };

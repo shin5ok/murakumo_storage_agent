@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/bin/env murakumo-perl
 # chkconfig: 35 99 10
 # description: murakumo storage agent
 use 5.014;

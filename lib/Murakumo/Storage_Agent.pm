@@ -3,7 +3,7 @@ package Murakumo::Storage_Agent;
 use 5.014;
 use strict;
 use warnings FATAL => 'all';
-use Class::Accessor::Lite ( rw => [qw( ua uuid admin_key api_uri db_path mount_path )] );
+use Class::Accessor::Lite ( rw => [qw( ua uuid admin_key api_uri db_path mount_path pre )] );
 use URI;
 use Data::Dumper;
 use JSON;
@@ -63,7 +63,8 @@ sub new {
   $ua->timeout ( $UA_TIMEOUT  );
   $ua->ssl_opts( @UA_SSL_OPTS );
 
-  $obj->ua( $ua );
+  $obj->ua ( $ua );
+  $obj->pre( { iowait => 0 } );
 
   return $obj;
 }
@@ -140,7 +141,10 @@ sub gathering_params {
     ($cpu) = grep { /^cpu\s/ } <$fh>;
     close $fh;
     my @cpu_stats = $cpu =~ /(\d+)/g;
-    $result->{iowait} = $cpu_stats[4];
+    $result->{iowait} = $cpu_stats[4] - $self->pre->{iowait};
+
+    $self->pre->{iowait} = $cpu_stats[4];
+
   }
 
   {
